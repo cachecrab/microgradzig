@@ -290,39 +290,38 @@ const ValueBuf = struct {
         }
     }
 
-    /// Make sure visited doesn't contain val
-    fn build_topo(self: *Self, allocator: Allocator, val: ValRef, visited: *ValRefSet, topo: *ArrayListUnmanaged(ValRef)) Error!void {
-        try visited.put(allocator, val);
-        const prev = self.get_prev(val);
-        const children = self.children_buf.get(prev);
-        for (children) |child_maybe| {
-            const child = child_maybe orelse break;
-            if (!visited.contains(child)) {
-                try self.build_topo(allocator, child, visited, topo);
-            }
-        }
-        try topo.append(allocator, val);
-    }
-
-    /// Remember to free result by calling .deinit()
-    fn build_topological_order(self: *Self, allocator: Allocator, val: ValRef) Error!ArrayListUnmanaged(ValRef) {
+    /// Returns ownership, call `result.deinit(allocator);`
+    fn build_rev_topo_order(self: *Self, allocator: Allocator, start: ValRef) Error!ArrayListUnmanaged(ValRef) {
         var topo = try ArrayListUnmanaged(ValRef).initCapacity(allocator, self.data.items.len);
+        _ = &topo;
 
         var visited = ValRefSet.empty;
         defer visited.deinit(allocator);
 
-        try self.build_topo(allocator, val, &visited, &topo);
+        var fifo = std.fifo.LinearFifo(ValRef, std.fifo.LinearFifoBufferType.Dynamic).init(allocator);
+        defer fifo.deinit();
+
+        try fifo.writeItem(start);
+        while (fifo.readItem()) |val| {
+            try visited.put(allocator, val);
+
+            const children = self.children_buf.get(self.get_prev(val));
+            for (children) |child_maybe| {
+                const child = child_maybe orelse break;
+                if (!visited.contains(child)) {
+                    try fifo.writeItem(child);
+                }
+            }
+            try topo.append(allocator, val);
+        }
 
         return topo;
     }
 
-    fn backward(self: *Self, topological_order: []const ValRef) void {
-        const last = topological_order.len - 1;
-        self.get_grad(topological_order[last]).* = 1;
+    fn backward(self: *Self, rev_topo_order: []const ValRef) void {
+        self.get_grad(rev_topo_order[0]).* = 1;
 
-        var i = last;
-        while (i > 0) : (i -= 1) {
-            const ref = topological_order[i];
+        for (rev_topo_order) |ref| {
             self.propagate(ref);
         }
     }
@@ -461,7 +460,7 @@ test "propagate" {
     try testing.expectApproxEqAbs(0, buf.get_grad(w2).*, eps);
 }
 
-test "build topological order" {
+test "build reversed topological order" {
     var buf = try ValueBuf.init(testing.allocator);
     defer buf.deinit();
 
@@ -476,7 +475,7 @@ test "build topological order" {
     const n = try buf.add(x1w1x2w2, b);
     const o = try buf.tanh(n);
 
-    var order = try buf.build_topological_order(testing.allocator, o);
+    var order = try buf.build_rev_topo_order(testing.allocator, o);
     defer order.deinit(testing.allocator);
 
     // Check the total number of nodes
@@ -486,7 +485,9 @@ test "build topological order" {
     var visited = std.AutoHashMap(u64, void).init(testing.allocator);
     defer visited.deinit();
 
-    for (order.items) |node| {
+    var i = order.items.len - 1;
+    while (i != 0) : (i -= 1) {
+        const node = order.items[i];
         const prev = buf.get_prev(node);
         const children = buf.children_buf.get(prev);
         for (children) |child_maybe| {
@@ -512,7 +513,7 @@ test "backwards" {
     const n = try buf.add(x1w1x2w2, b);
     const o = try buf.tanh(n);
 
-    var order = try buf.build_topological_order(testing.allocator, o);
+    var order = try buf.build_rev_topo_order(testing.allocator, o);
     defer order.deinit(testing.allocator);
 
     buf.backward(order.items);
@@ -536,7 +537,7 @@ test "non-tree backwards" {
     const a = try buf.leaf(3);
     const b = try buf.add(a, a);
 
-    var order = try buf.build_topological_order(testing.allocator, b);
+    var order = try buf.build_rev_topo_order(testing.allocator, b);
     defer order.deinit(testing.allocator);
 
     buf.backward(order.items);
