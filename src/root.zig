@@ -93,7 +93,7 @@ const ChildrenRef = packed struct {
     }
 
     fn is_unary(self: Self) bool {
-        return self.unary_or_binary == 0;
+        return self.unary_or_binary == 0 and self.index != 0;
     }
 
     fn is_binary(self: Self) bool {
