@@ -62,12 +62,43 @@ const ValRefSet = struct {
     }
 };
 
-const ChildrenRef = struct {
-    index: u64,
+const ChildrenRef = packed struct {
+    unary_or_binary: u1,
+    index: u63,
 
     const Self = @This();
 
-    const empty = Self{ .index = 0 };
+    const empty = Self{ .unary_or_binary = 0, .index = 0 };
+
+    fn unary(index: u63) Self {
+        return Self{
+            .unary_or_binary = 0,
+            .index = index + 1,
+        };
+    }
+
+    fn binary(index: u63) Self {
+        return Self{
+            .unary_or_binary = 1,
+            .index = index + 1,
+        };
+    }
+
+    fn get_index(self: Self) u63 {
+        return self.index - 1;
+    }
+
+    fn is_empty(self: Self) bool {
+        return self.unary_or_binary == 0 and self.index == 0;
+    }
+
+    fn is_unary(self: Self) bool {
+        return self.unary_or_binary == 0;
+    }
+
+    fn is_binary(self: Self) bool {
+        return self.unary_or_binary == 1;
+    }
 };
 
 const ChildrenBuf = struct {
@@ -89,44 +120,40 @@ const ChildrenBuf = struct {
     }
 
     fn new_unary(self: *Self, allocator: Allocator, ref: ValRef) Error!ChildrenRef {
-        const index = self.unary.items.len;
+        const index: u63 = @intCast(self.unary.items.len);
         try self.unary.append(allocator, ref);
 
-        return ChildrenRef{ .index = ((index + 1) << 1) };
+        return ChildrenRef.unary(index);
     }
 
     fn new_binary(self: *Self, allocator: Allocator, refs: [2]ValRef) Error!ChildrenRef {
-        const index = self.binary.items.len;
+        const index: u63 = @intCast(self.binary.items.len);
         try self.binary.append(allocator, refs);
 
-        return ChildrenRef{ .index = ((index + 1) << 1) | 1 };
+        return ChildrenRef.binary(index);
     }
 
     fn get_unary(self: Self, ref: ChildrenRef) ValRef {
-        assert(ref.index != 0);
-        assert(ref.index & 1 == 0);
-        return self.unary.items[(ref.index >> 1) - 1];
+        assert(ref.is_unary());
+        return self.unary.items[ref.get_index()];
     }
 
     fn get_binary(self: Self, ref: ChildrenRef) [2]ValRef {
-        assert(ref.index != 0);
-        assert(ref.index & 1 == 1);
-        return self.binary.items[(ref.index >> 1) - 1];
+        assert(ref.is_binary());
+        return self.binary.items[ref.get_index()];
     }
 
     fn get(self: Self, ref: ChildrenRef) [2]?ValRef {
-        if (ref.index == 0) {
+        if (ref.is_empty()) {
             return .{ null, null };
         }
 
-        const parity = ref.index & 1;
-        switch (parity) {
+        switch (ref.unary_or_binary) {
             0 => return .{ self.get_unary(ref), null },
             1 => {
                 const a, const b = self.get_binary(ref);
                 return .{ a, b };
             },
-            else => unreachable,
         }
     }
 
@@ -426,7 +453,7 @@ test "propagate" {
     try testing.expectApproxEqAbs(0.5, buf.get_grad(x2w2).*, eps);
 
     buf.propagate(x1w1);
-    try testing.expectApproxEqAbs(-1.4999999999999996e0, buf.get_grad(x1).*, eps);
+    try testing.expectApproxEqAbs(-1.5, buf.get_grad(x1).*, 2 * eps);
     try testing.expectApproxEqAbs(1.0, buf.get_grad(w1).*, eps);
 
     buf.propagate(x2w2);
