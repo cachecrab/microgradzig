@@ -27,38 +27,38 @@ const ValRefSet = struct {
     const Self = @This();
     const Set = AutoHashMapUnmanaged(ValRef, void);
 
-    set: Set,
+    inner: Set,
 
-    const empty = Self{ .set = Set{} };
+    const empty = Self{ .inner = Set{} };
 
     fn from_slice(allocator: Allocator, slice: anytype) Error!Self {
         var set = Self.empty;
 
         inline for (slice) |ref| {
-            try set.set.put(allocator, ref, {});
+            try set.inner.put(allocator, ref, {});
         }
 
         return set;
     }
 
     fn size(self: Self) Set.Size {
-        return self.set.size;
+        return self.inner.size;
     }
 
     fn put(self: *Self, allocator: Allocator, ref: ValRef) Error!void {
-        try self.set.put(allocator, ref, {});
+        try self.inner.put(allocator, ref, {});
     }
 
     fn contains(self: Self, ref: ValRef) bool {
-        return self.set.contains(ref);
+        return self.inner.contains(ref);
     }
 
     fn iterator(self: Self) Set.KeyIterator {
-        return self.set.keyIterator();
+        return self.inner.keyIterator();
     }
 
     fn deinit(self: *Self, allocator: Allocator) void {
-        self.set.deinit(allocator);
+        self.inner.deinit(allocator);
     }
 };
 
