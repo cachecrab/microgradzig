@@ -78,8 +78,6 @@ const ChildrenBuf = struct {
 
     const Self = @This();
 
-    const empty = ChildrenRef{ .index = 0 };
-
     fn init(allocator: Allocator) Error!Self {
         const unary = try ArrayListUnmanaged(ValRef).initCapacity(allocator, init_capacity);
         const binary = try ArrayListUnmanaged([2]ValRef).initCapacity(allocator, init_capacity);
@@ -212,9 +210,7 @@ const ValueBuf = struct {
     }
 
     fn add(self: *Self, a: ValRef, b: ValRef) Error!ValRef {
-        // const children = try ValRefSet.from_slice(self.allocator, .{ a, b });
         const children = try self.children_buf.new_binary(self.allocator, .{ a, b });
-        std.debug.print("add: {}\n", .{children});
 
         return self.value(
             self.get_data(a) + self.get_data(b),
@@ -224,9 +220,7 @@ const ValueBuf = struct {
     }
 
     fn mul(self: *Self, a: ValRef, b: ValRef) Error!ValRef {
-        // const children = try ValRefSet.from_slice(self.allocator, .{ a, b });
         const children = try self.children_buf.new_binary(self.allocator, .{ a, b });
-        std.debug.print("mul: {}\n", .{children});
 
         return self.value(
             self.get_data(a) * self.get_data(b),
@@ -236,12 +230,11 @@ const ValueBuf = struct {
     }
 
     fn tanh(self: *Self, val: ValRef) Error!ValRef {
-        // const children = try ValRefSet.from_slice(self.allocator, .{val});
         const children = try self.children_buf.new_unary(self.allocator, val);
-        std.debug.print("tanh: {}\n", .{children});
 
         const data = self.get_data(val);
-        const out = (@exp(2 * data) - 1) / (@exp(2 * data) + 1);
+        const e_2data = @exp(2 * data);
+        const out = (e_2data - 1) / (e_2data + 1);
 
         return self.value(out, children, Op.Tanh);
     }
@@ -254,8 +247,6 @@ const ValueBuf = struct {
         switch (self.get_op(val)) {
             Op.Leaf => {},
             Op.Add => {
-                // const a = prev.next().?.*;
-                // const b = prev.next().?.*;
                 self.get_grad(a_maybe.?).* += grad;
                 self.get_grad(b_maybe.?).* += grad;
             },
@@ -266,7 +257,6 @@ const ValueBuf = struct {
                 self.get_grad(b).* += self.get_data(a) * grad;
             },
             Op.Tanh => {
-                // const a = prev.next().?.*;
                 const data = self.get_data(val);
                 self.get_grad(a_maybe.?).* += (1 - data * data) * grad;
             },
@@ -275,11 +265,9 @@ const ValueBuf = struct {
 
     /// Make sure visited doesn't contain val
     fn build_topo(self: *Self, allocator: Allocator, val: ValRef, visited: *ValRefSet, topo: *ArrayListUnmanaged(ValRef)) Error!void {
-        // if (!visited.contains(val)) {
         try visited.put(allocator, val);
         const prev = self.get_prev(val);
         const children = self.children_buf.get(prev);
-        // std.debug.print("-- build topo children: {any}\n", .{children});
         for (children) |child_maybe| {
             const child = child_maybe orelse break;
             if (!visited.contains(child)) {
@@ -287,25 +275,25 @@ const ValueBuf = struct {
             }
         }
         try topo.append(allocator, val);
-        // }
     }
 
     /// Remember to free result by calling .deinit()
     fn build_topological_order(self: *Self, allocator: Allocator, val: ValRef) Error!ArrayListUnmanaged(ValRef) {
+        var topo = try ArrayListUnmanaged(ValRef).initCapacity(allocator, self.data.items.len);
+
         var visited = ValRefSet.empty;
         defer visited.deinit(allocator);
-
-        var topo = try ArrayListUnmanaged(ValRef).initCapacity(allocator, self.data.items.len);
 
         try self.build_topo(allocator, val, &visited, &topo);
 
         return topo;
     }
 
-    fn backward(self: *Self, val: ValRef, topological_order: []const ValRef) void {
-        self.get_grad(val).* = 1;
+    fn backward(self: *Self, topological_order: []const ValRef) void {
+        const last = topological_order.len - 1;
+        self.get_grad(topological_order[last]).* = 1;
 
-        var i = topological_order.len - 1;
+        var i = last;
         while (i > 0) : (i -= 1) {
             const ref = topological_order[i];
             self.propagate(ref);
@@ -351,7 +339,6 @@ test "mul" {
     const data = buf.get_data(muled);
     try testing.expectEqual(-6, data);
 
-    // const prev = buf.get_prev_binary(muled);
     const prev = buf.get_prev(muled);
     const prev1, const prev2 = buf.children_buf.get(prev);
     try testing.expectEqual(a, prev1);
@@ -448,7 +435,6 @@ test "propagate" {
 }
 
 test "build topological order" {
-    std.debug.print("build topological order\n\n-------------------------\n\n", .{});
     var buf = try ValueBuf.init(testing.allocator);
     defer buf.deinit();
 
@@ -466,69 +452,55 @@ test "build topological order" {
     var order = try buf.build_topological_order(testing.allocator, o);
     defer order.deinit(testing.allocator);
 
-    std.debug.print("-------------------------", .{});
+    // Check the total number of nodes
+    try testing.expectEqual(10, order.items.len);
 
-    const expected_order: [10]ValRef = .{
-        b,
-        x1,
-        w1,
-        x1w1,
-        x2,
-        w2,
-        x2w2,
-        x1w1x2w2,
-        n,
-        o,
-    };
+    // Check that the order is valid (parents come before children)
+    var visited = std.AutoHashMap(u64, void).init(testing.allocator);
+    defer visited.deinit();
 
-    // for (expected_order, order.items) |expected, actual| {
-    //     try testing.expectEqual(expected, actual);
-    // }
-    _ = expected_order;
-    std.debug.print("{any}", .{order.items});
-    try testing.expect(false);
+    for (order.items) |node| {
+        const prev = buf.get_prev(node);
+        const children = buf.children_buf.get(prev);
+        for (children) |child_maybe| {
+            const child = child_maybe orelse break;
+            try testing.expect(visited.contains(child.index));
+        }
+        try visited.put(node.index, {});
+    }
 }
 
-// test "backwards" {
-//     var buf = try ValueBuf.init(testing.allocator);
-//     defer buf.deinit();
+test "backwards" {
+    var buf = try ValueBuf.init(testing.allocator);
+    defer buf.deinit();
 
-//     const x1 = try buf.leaf(2);
-//     const x2 = try buf.leaf(0);
-//     const w1 = try buf.leaf(-3);
-//     const w2 = try buf.leaf(1);
-//     const b = try buf.leaf(6.8813735870195432);
-//     const x1w1 = try buf.mul(x1, w1);
-//     const x2w2 = try buf.mul(x2, w2);
-//     const x1w1x2w2 = try buf.add(x1w1, x2w2);
-//     const n = try buf.add(x1w1x2w2, b);
-//     const o = try buf.tanh(n);
+    const x1 = try buf.leaf(2);
+    const x2 = try buf.leaf(0);
+    const w1 = try buf.leaf(-3);
+    const w2 = try buf.leaf(1);
+    const b = try buf.leaf(6.8813735870195432);
+    const x1w1 = try buf.mul(x1, w1);
+    const x2w2 = try buf.mul(x2, w2);
+    const x1w1x2w2 = try buf.add(x1w1, x2w2);
+    const n = try buf.add(x1w1x2w2, b);
+    const o = try buf.tanh(n);
 
-//     var order = try buf.build_topological_order(testing.allocator, o);
-//     defer order.deinit(testing.allocator);
+    var order = try buf.build_topological_order(testing.allocator, o);
+    defer order.deinit(testing.allocator);
 
-//     buf.backward(o, order.items);
+    buf.backward(order.items);
 
-//     const expected_grads: [10]f64 = .{
-//         4.999999999999999e-1,
-//         -1.4999999999999996e0,
-//         9.999999999999998e-1,
-//         4.999999999999999e-1,
-//         4.999999999999999e-1,
-//         0e0,
-//         4.999999999999999e-1,
-//         4.999999999999999e-1,
-//         4.999999999999999e-1,
-//         1e0,
-//     };
-
-//     for (expected_grads, order.items) |expected, ref| {
-//         const val = buf.get_data(ref);
-//         const actual = buf.get_grad(ref).*;
-//         std.debug.print("\nValue: {:.4}, Grad: {:.4}\n", .{ val, actual });
-//         try testing.expectApproxEqAbs(expected, actual, std.math.floatEpsAt(f64, expected));
-//     }
-// }
+    try testing.expectApproxEqAbs(-1.5, buf.get_grad(x1).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2).*, 0.1);
+    try testing.expectApproxEqAbs(1, buf.get_grad(w1).*, 0.1);
+    try testing.expectApproxEqAbs(0, buf.get_grad(w2).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(b).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2w2).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1x2w2).*, 0.1);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(n).*, 0.1);
+    try testing.expectApproxEqAbs(1, buf.get_grad(o).*, 0.1);
+}
 
 test "non-tree backwards" {
     var buf = try ValueBuf.init(testing.allocator);
@@ -540,7 +512,7 @@ test "non-tree backwards" {
     var order = try buf.build_topological_order(testing.allocator, b);
     defer order.deinit(testing.allocator);
 
-    buf.backward(b, order.items);
+    buf.backward(order.items);
 
     try testing.expectApproxEqAbs(2, buf.get_grad(a).*, std.math.floatEpsAt(f64, 2));
     try testing.expectApproxEqAbs(1, buf.get_grad(b).*, std.math.floatEpsAt(f64, 1));
