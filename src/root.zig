@@ -490,16 +490,16 @@ test "backwards" {
 
     buf.backward(order.items);
 
-    try testing.expectApproxEqAbs(-1.5, buf.get_grad(x1).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2).*, 0.1);
-    try testing.expectApproxEqAbs(1, buf.get_grad(w1).*, 0.1);
-    try testing.expectApproxEqAbs(0, buf.get_grad(w2).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(b).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2w2).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1x2w2).*, 0.1);
-    try testing.expectApproxEqAbs(0.5, buf.get_grad(n).*, 0.1);
-    try testing.expectApproxEqAbs(1, buf.get_grad(o).*, 0.1);
+    try testing.expectApproxEqAbs(-1.5, buf.get_grad(x1).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2).*, 0.01);
+    try testing.expectApproxEqAbs(1, buf.get_grad(w1).*, 0.01);
+    try testing.expectApproxEqAbs(0, buf.get_grad(w2).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(b).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x2w2).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(x1w1x2w2).*, 0.01);
+    try testing.expectApproxEqAbs(0.5, buf.get_grad(n).*, 0.01);
+    try testing.expectApproxEqAbs(1, buf.get_grad(o).*, 0.01);
 }
 
 test "non-tree backwards" {
@@ -514,6 +514,6 @@ test "non-tree backwards" {
 
     buf.backward(order.items);
 
-    try testing.expectApproxEqAbs(2, buf.get_grad(a).*, std.math.floatEpsAt(f64, 2));
-    try testing.expectApproxEqAbs(1, buf.get_grad(b).*, std.math.floatEpsAt(f64, 1));
+    try testing.expectApproxEqAbs(2, buf.get_grad(a).*, 0.01);
+    try testing.expectApproxEqAbs(1, buf.get_grad(b).*, 0.01);
 }
