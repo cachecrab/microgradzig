@@ -1,5 +1,33 @@
 // Micrograd in Zig
 
+export fn godbolt() f64 {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    const allocator = gpa.allocator();
+
+    var buf = ValueBuf.init(allocator) catch unreachable;
+    defer buf.deinit();
+
+    const x1 = buf.leaf(2) catch unreachable;
+    const x2 = buf.leaf(0) catch unreachable;
+    const w1 = buf.leaf(-3) catch unreachable;
+    const w2 = buf.leaf(1) catch unreachable;
+    const b = buf.leaf(6.8813735870195432) catch unreachable;
+    const x1w1 = buf.mul(x1, w1) catch unreachable;
+    const x2w2 = buf.mul(x2, w2) catch unreachable;
+    const x1w1x2w2 = buf.add(x1w1, x2w2) catch unreachable;
+    const n = buf.add(x1w1x2w2, b) catch unreachable;
+    const o = buf.tanh(n) catch unreachable;
+
+    var order = buf.build_topological_order(allocator, o) catch unreachable;
+    defer order.deinit(allocator);
+
+    buf.backward(order.items);
+
+    return buf.get_grad(x1).*;
+}
+
 const std = @import("std");
 const testing = std.testing;
 
@@ -293,7 +321,6 @@ const ValueBuf = struct {
     /// Returns ownership, call `result.deinit(allocator);`
     fn build_rev_topo_order(self: *Self, allocator: Allocator, start: ValRef) Error!ArrayListUnmanaged(ValRef) {
         var topo = try ArrayListUnmanaged(ValRef).initCapacity(allocator, self.data.items.len);
-        _ = &topo;
 
         var visited = ValRefSet.empty;
         defer visited.deinit(allocator);
