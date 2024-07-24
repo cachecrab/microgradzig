@@ -122,9 +122,9 @@ const ChildrenBuf = struct {
         return ChildrenRef.unary(index);
     }
 
-    fn new_binary(self: *Self, allocator: Allocator, refs: [2]ValRef) Error!ChildrenRef {
+    fn new_binary(self: *Self, allocator: Allocator, a: ValRef, b: ValRef) Error!ChildrenRef {
         const index: u63 = @intCast(self.binary.items.len);
-        try self.binary.append(allocator, refs);
+        try self.binary.append(allocator, [2]ValRef{ a, b });
 
         return ChildrenRef.binary(index);
     }
@@ -222,7 +222,7 @@ const ValueBuf = struct {
     }
 
     fn add(self: *Self, a: ValRef, b: ValRef) Error!ValRef {
-        const children = try self.children_buf.new_binary(self.allocator, .{ a, b });
+        const children = try self.children_buf.new_binary(self.allocator, a, b);
 
         return self.value(
             self.get_data(a) + self.get_data(b),
@@ -232,7 +232,7 @@ const ValueBuf = struct {
     }
 
     fn mul(self: *Self, a: ValRef, b: ValRef) Error!ValRef {
-        const children = try self.children_buf.new_binary(self.allocator, .{ a, b });
+        const children = try self.children_buf.new_binary(self.allocator, a, b);
 
         return self.value(
             self.get_data(a) * self.get_data(b),
