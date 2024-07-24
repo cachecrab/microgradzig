@@ -491,3 +491,26 @@ test "non-tree backwards" {
     try testing.expectApproxEqAbs(2, buf.get_grad(a).*, 0.01);
     try testing.expectApproxEqAbs(1, buf.get_grad(b).*, 0.01);
 }
+
+test "fancy" {
+    var buf = try ValueBuf.init(testing.allocator);
+    defer buf.deinit();
+
+    const a = try buf.leaf(-2);
+    const b = try buf.leaf(3);
+
+    const d = try buf.mul(a, b);
+    const e = try buf.add(a, b);
+    const f = try buf.mul(d, e);
+
+    var order = try buf.build_rev_topo_order(testing.allocator, f);
+    defer order.deinit(testing.allocator);
+
+    buf.backward(order.items);
+
+    try testing.expectApproxEqAbs(-3, buf.get_grad(a).*, 0.01);
+    try testing.expectApproxEqAbs(-8, buf.get_grad(b).*, 0.01);
+    try testing.expectApproxEqAbs(1, buf.get_grad(d).*, 0.01);
+    try testing.expectApproxEqAbs(-6, buf.get_grad(e).*, 0.01);
+    try testing.expectApproxEqAbs(1, buf.get_grad(f).*, 0.01);
+}
