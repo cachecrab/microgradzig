@@ -163,7 +163,7 @@ const ChildrenBuf = struct {
 
     fn get(self: Self, ref: ChildrenRef) []ValRef {
         if (ref.is_empty()) {
-            return self.unary.items[0..0];
+            return &[0]ValRef{};
         }
 
         const index = ref.get_index();
