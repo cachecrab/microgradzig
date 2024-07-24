@@ -1,32 +1,32 @@
 // Micrograd in Zig
 
-export fn godbolt() f64 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+// export fn godbolt() f64 {
+//     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//     defer _ = gpa.deinit();
 
-    const allocator = gpa.allocator();
+//     const allocator = gpa.allocator();
 
-    var buf = ValueBuf.init(allocator) catch unreachable;
-    defer buf.deinit();
+//     var buf = ValueBuf.init(allocator) catch unreachable;
+//     defer buf.deinit();
 
-    const x1 = buf.leaf(2) catch unreachable;
-    const x2 = buf.leaf(0) catch unreachable;
-    const w1 = buf.leaf(-3) catch unreachable;
-    const w2 = buf.leaf(1) catch unreachable;
-    const b = buf.leaf(6.8813735870195432) catch unreachable;
-    const x1w1 = buf.mul(x1, w1) catch unreachable;
-    const x2w2 = buf.mul(x2, w2) catch unreachable;
-    const x1w1x2w2 = buf.add(x1w1, x2w2) catch unreachable;
-    const n = buf.add(x1w1x2w2, b) catch unreachable;
-    const o = buf.tanh(n) catch unreachable;
+//     const x1 = buf.leaf(2) catch unreachable;
+//     const x2 = buf.leaf(0) catch unreachable;
+//     const w1 = buf.leaf(-3) catch unreachable;
+//     const w2 = buf.leaf(1) catch unreachable;
+//     const b = buf.leaf(6.8813735870195432) catch unreachable;
+//     const x1w1 = buf.mul(x1, w1) catch unreachable;
+//     const x2w2 = buf.mul(x2, w2) catch unreachable;
+//     const x1w1x2w2 = buf.add(x1w1, x2w2) catch unreachable;
+//     const n = buf.add(x1w1x2w2, b) catch unreachable;
+//     const o = buf.tanh(n) catch unreachable;
 
-    var order = buf.build_topological_order(allocator, o) catch unreachable;
-    defer order.deinit(allocator);
+//     var order = buf.build_topological_order(allocator, o) catch unreachable;
+//     defer order.deinit(allocator);
 
-    buf.backward(order.items);
+//     buf.backward(order.items);
 
-    return buf.get_grad(x1).*;
-}
+//     return buf.get_grad(x1).*;
+// }
 
 const std = @import("std");
 const testing = std.testing;
@@ -161,27 +161,16 @@ const ChildrenBuf = struct {
         return ChildrenRef.binary(index);
     }
 
-    fn get_unary(self: Self, ref: ChildrenRef) ValRef {
-        assert(ref.is_unary());
-        return self.unary.items[ref.get_index()];
-    }
-
-    fn get_binary(self: Self, ref: ChildrenRef) [2]ValRef {
-        assert(ref.is_binary());
-        return self.binary.items[ref.get_index()];
-    }
-
-    fn get(self: Self, ref: ChildrenRef) [2]?ValRef {
+    fn get(self: Self, ref: ChildrenRef) []ValRef {
         if (ref.is_empty()) {
-            return .{ null, null };
+            return self.unary.items[0..0];
         }
 
+        const index = ref.get_index();
+
         switch (ref.unary_or_binary) {
-            0 => return .{ self.get_unary(ref), null },
-            1 => {
-                const a, const b = self.get_binary(ref);
-                return .{ a, b };
-            },
+            0 => return self.unary.items[index .. index + 1],
+            1 => return &self.binary.items[index],
         }
     }
 
@@ -297,23 +286,23 @@ const ValueBuf = struct {
     fn propagate(self: *Self, val: ValRef) void {
         const grad = self.get_grad(val).*;
         const prev = self.get_prev(val);
-        const a_maybe, const b_maybe = self.children_buf.get(prev);
+        const children = self.children_buf.get(prev);
 
         switch (self.get_op(val)) {
             Op.Leaf => {},
             Op.Add => {
-                self.get_grad(a_maybe.?).* += grad;
-                self.get_grad(b_maybe.?).* += grad;
+                const a, const b = children[0..2].*;
+                self.get_grad(a).* += grad;
+                self.get_grad(b).* += grad;
             },
             Op.Mul => {
-                const a = a_maybe.?;
-                const b = b_maybe.?;
+                const a, const b = children[0..2].*;
                 self.get_grad(a).* += self.get_data(b) * grad;
                 self.get_grad(b).* += self.get_data(a) * grad;
             },
             Op.Tanh => {
                 const data = self.get_data(val);
-                self.get_grad(a_maybe.?).* += (1 - data * data) * grad;
+                self.get_grad(children[0]).* += (1 - data * data) * grad;
             },
         }
     }
@@ -333,8 +322,7 @@ const ValueBuf = struct {
             try visited.put(allocator, val);
 
             const children = self.children_buf.get(self.get_prev(val));
-            for (children) |child_maybe| {
-                const child = child_maybe orelse break;
+            for (children) |child| {
                 if (!visited.contains(child)) {
                     try fifo.writeItem(child);
                 }
@@ -371,9 +359,9 @@ test "add" {
     try testing.expectEqual(-1, data);
 
     const prev = buf.get_prev(added);
-    const prev1, const prev2 = buf.children_buf.get(prev);
-    try testing.expectEqual(a, prev1);
-    try testing.expectEqual(b, prev2);
+    const children = buf.children_buf.get(prev);
+    try testing.expectEqual(a, children[0]);
+    try testing.expectEqual(b, children[1]);
 }
 
 test "mul" {
@@ -393,9 +381,9 @@ test "mul" {
     try testing.expectEqual(-6, data);
 
     const prev = buf.get_prev(muled);
-    const prev1, const prev2 = buf.children_buf.get(prev);
-    try testing.expectEqual(a, prev1);
-    try testing.expectEqual(b, prev2);
+    const children = buf.children_buf.get(prev);
+    try testing.expectEqual(a, children[0]);
+    try testing.expectEqual(b, children[1]);
 }
 
 test "mul add" {
@@ -421,9 +409,9 @@ test "mul add" {
     try testing.expectEqual(4, val);
 
     const prev = buf.get_prev(added);
-    const prev1, const prev2 = buf.children_buf.get(prev);
-    try testing.expectEqual(muled, prev1);
-    try testing.expectEqual(c, prev2);
+    const children = buf.children_buf.get(prev);
+    try testing.expectEqual(muled, children[0]);
+    try testing.expectEqual(c, children[1]);
 }
 
 test "mul add mul" {
@@ -462,9 +450,8 @@ test "propagate" {
     try testing.expectApproxEqAbs(7.071067811865476e-1, buf.get_data(o), eps);
 
     const prev = buf.get_prev(o);
-    const prev1, const prev2 = buf.children_buf.get(prev);
-    try testing.expectEqual(n, prev1);
-    try testing.expectEqual(null, prev2);
+    const children = buf.children_buf.get(prev);
+    try testing.expectEqual(n, children[0]);
 
     buf.get_grad(o).* = 1;
     buf.propagate(o);
@@ -509,7 +496,7 @@ test "build reversed topological order" {
     try testing.expectEqual(10, order.items.len);
 
     // Check that the order is valid (parents come before children)
-    var visited = std.AutoHashMap(u64, void).init(testing.allocator);
+    var visited = std.AutoHashMap(ValRef, void).init(testing.allocator);
     defer visited.deinit();
 
     var i = order.items.len - 1;
@@ -517,11 +504,10 @@ test "build reversed topological order" {
         const node = order.items[i];
         const prev = buf.get_prev(node);
         const children = buf.children_buf.get(prev);
-        for (children) |child_maybe| {
-            const child = child_maybe orelse break;
-            try testing.expect(visited.contains(child.index));
+        for (children) |child| {
+            try testing.expect(visited.contains(child));
         }
-        try visited.put(node.index, {});
+        try visited.put(node, {});
     }
 }
 
