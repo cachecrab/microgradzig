@@ -23,41 +23,6 @@ const ValRef = struct {
     index: u64,
 };
 
-const ValRefSet = struct {
-    const Self = @This();
-    const Set = AutoHashMapUnmanaged(ValRef, void);
-
-    inner: Set,
-
-    const empty = Self{ .inner = Set{} };
-
-    fn from_slice(allocator: Allocator, slice: anytype) Error!Self {
-        var set = Self.empty;
-
-        inline for (slice) |ref| {
-            try set.inner.put(allocator, ref, {});
-        }
-
-        return set;
-    }
-
-    fn size(self: Self) Set.Size {
-        return self.inner.size;
-    }
-
-    fn put(self: *Self, allocator: Allocator, ref: ValRef) Error!void {
-        try self.inner.put(allocator, ref, {});
-    }
-
-    fn contains(self: Self, ref: ValRef) bool {
-        return self.inner.contains(ref);
-    }
-
-    fn deinit(self: *Self, allocator: Allocator) void {
-        self.inner.deinit(allocator);
-    }
-};
-
 const ChildrenRef = packed struct {
     unary_or_binary: u1,
     index: u63,
@@ -201,7 +166,7 @@ const ValueBuf = struct {
         return ValRef{ .index = index };
     }
 
-    fn get_data(self: *Self, ref: ValRef) f64 {
+    fn get_data(self: *const Self, ref: ValRef) f64 {
         return self.data.items[ref.index];
     }
 
@@ -209,11 +174,11 @@ const ValueBuf = struct {
         return &self.grads.items[ref.index];
     }
 
-    fn get_prev(self: *Self, ref: ValRef) ChildrenRef {
+    fn get_prev(self: *const Self, ref: ValRef) ChildrenRef {
         return self.prev.items[ref.index];
     }
 
-    fn get_op(self: *Self, ref: ValRef) Op {
+    fn get_op(self: *const Self, ref: ValRef) Op {
         return self.ops.items[ref.index];
     }
 
@@ -276,22 +241,22 @@ const ValueBuf = struct {
     }
 
     /// Returns ownership, call `result.deinit(allocator);`
-    fn build_rev_topo_order(self: *Self, allocator: Allocator, start: ValRef) Error!ArrayListUnmanaged(ValRef) {
+    fn build_rev_topo_order(self: *const Self, allocator: Allocator, start: ValRef) Error!ArrayListUnmanaged(ValRef) {
         var topo = try ArrayListUnmanaged(ValRef).initCapacity(allocator, self.data.items.len);
 
-        var visited = ValRefSet.empty;
+        var visited = AutoHashMapUnmanaged(ValRef, void){};
         defer visited.deinit(allocator);
 
         var fifo = std.fifo.LinearFifo(ValRef, std.fifo.LinearFifoBufferType.Dynamic).init(allocator);
         defer fifo.deinit();
 
         try fifo.writeItem(start);
-        while (fifo.readItem()) |val| {
-            try visited.put(allocator, val);
+        try visited.put(allocator, start, {});
 
+        while (fifo.readItem()) |val| {
             const children = self.children_buf.get(self.get_prev(val));
             for (children) |child| {
-                if (!visited.contains(child)) {
+                if (try visited.fetchPut(allocator, child, {}) == null) {
                     try fifo.writeItem(child);
                 }
             }
